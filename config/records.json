@@ -1,0 +1,15 @@
+
+{
+    "dns1": {
+        "pes.local": "10.0.0.10",
+        "mrd.local": "10.0.0.60"
+    },
+    "dns2": {
+        "google.local": "10.0.0.20",
+        "youtube.local": "10.0.0.30"
+    },
+    "dns3": {
+        "github.local": "10.0.0.40",
+        "amazon.local": "10.0.0.50"
+    }
+}
