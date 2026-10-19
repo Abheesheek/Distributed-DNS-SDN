@@ -5,12 +5,10 @@ import sys
 import time
 from pathlib import Path
 
-SERVER_IP = "127.0.0.1"
-
 SERVERS = {
-    "dns1": 15053,
-    "dns2": 15054,
-    "dns3": 15055
+    "dns1": ("10.0.0.2", 15053),
+    "dns2": ("10.0.0.3", 15054),
+    "dns3": ("10.0.0.4", 15055)
 }
 
 RECORDS_FILE = Path(__file__).resolve().parent / "config" / "records.json"
@@ -27,19 +25,18 @@ def load_records(server_name):
     return all_records[server_name]
 
 
-def check_server(peer_name, peer_port):
+def check_server(peer_name, peer_address):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.settimeout(TIMEOUT)
 
         try:
-            sock.sendto(
-                b"HEALTH_CHECK",
-                (SERVER_IP, peer_port)
-            )
-
+            sock.sendto(b"HEALTH_CHECK", peer_address)
             data, address = sock.recvfrom(1024)
 
-            return data.decode() == "ALIVE"
+            return (
+                address == peer_address
+                and data.decode() == "ALIVE"
+            )
 
         except (socket.timeout, OSError):
             return False
@@ -48,18 +45,18 @@ def check_server(peer_name, peer_port):
 def update_server_health(server_name, server_status,
                          last_health_check):
 
-    current_time = time.monotonic()
-
-    for peer_name, peer_port in SERVERS.items():
+    for peer_name, peer_address in SERVERS.items():
 
         if peer_name == server_name:
             continue
+
+        current_time = time.monotonic()
 
         if (current_time - last_health_check[peer_name]
                 < HEALTH_CHECK_INTERVAL):
             continue
 
-        is_alive = check_server(peer_name, peer_port)
+        is_alive = check_server(peer_name, peer_address)
 
         new_status = "ACTIVE" if is_alive else "DOWN"
         old_status = server_status[peer_name]
@@ -76,7 +73,7 @@ def update_server_health(server_name, server_status,
 
 def forward_query(hostname, server_name, server_status):
 
-    for peer_name, peer_port in SERVERS.items():
+    for peer_name, peer_address in SERVERS.items():
 
         if peer_name == server_name:
             continue
@@ -92,17 +89,15 @@ def forward_query(hostname, server_name, server_status):
 
             try:
                 message = f"FORWARD|{hostname}"
-
-                sock.sendto(
-                    message.encode(),
-                    (SERVER_IP, peer_port)
-                )
+                sock.sendto(message.encode(), peer_address)
 
                 data, address = sock.recvfrom(1024)
-                response = data.decode()
 
-                if server_status[peer_name] == "DOWN":
-                    print(f"SERVER RECOVERED: {peer_name}")
+                if address != peer_address:
+                    print(f"Ignoring unexpected reply from {address}")
+                    continue
+
+                response = data.decode()
 
                 server_status[peer_name] = "ACTIVE"
 
@@ -120,7 +115,7 @@ def forward_query(hostname, server_name, server_status):
 
 def start_server(server_name):
     records = load_records(server_name)
-    port = SERVERS[server_name]
+    server_ip, port = SERVERS[server_name]
 
     cache = {}
 
@@ -137,13 +132,13 @@ def start_server(server_name):
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
 
-        server.bind((SERVER_IP, port))
+        server.bind((server_ip, port))
         server.settimeout(1)
 
         print("====================================")
         print(f"       {server_name.upper()} SERVER")
         print("====================================")
-        print(f"Listening on {SERVER_IP}:{port}")
+        print(f"Listening on {server_ip}:{port}")
         print(f"Loaded {len(records)} records")
         print(f"Cache TTL: {CACHE_TTL} seconds")
         print("Health monitoring enabled")
@@ -232,7 +227,7 @@ def start_server(server_name):
 if __name__ == "__main__":
 
     if len(sys.argv) != 2 or sys.argv[1] not in SERVERS:
-        print("Usage: python dns_server.py dns1|dns2|dns3")
+        print("Usage: python3 dns_server.py dns1|dns2|dns3")
         sys.exit(1)
 
     try:

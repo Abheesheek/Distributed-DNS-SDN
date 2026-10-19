@@ -2,12 +2,10 @@
 import socket
 import time
 
-SERVER_IP = "127.0.0.1"
-
 SERVERS = {
-    "dns1": 15053,
-    "dns2": 15054,
-    "dns3": 15055
+    "dns1": ("10.0.0.2", 15053),
+    "dns2": ("10.0.0.3", 15054),
+    "dns3": ("10.0.0.4", 15055)
 }
 
 
@@ -24,7 +22,7 @@ def start_client():
         print("Invalid DNS server")
         return
 
-    server_port = SERVERS[server_name]
+    server_address = SERVERS[server_name]
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
         client.settimeout(5)
@@ -46,7 +44,7 @@ def start_client():
             try:
                 client.sendto(
                     hostname.encode(),
-                    (SERVER_IP, server_port)
+                    server_address
                 )
 
                 data, address = client.recvfrom(1024)
@@ -73,3 +71,4 @@ def start_client():
 
 if __name__ == "__main__":
     start_client()
+
