@@ -19,12 +19,45 @@ CACHE_TTL = 30
 HEALTH_CHECK_INTERVAL = 2
 MAX_HEALTH_FAILURES = 3
 
+SDN_CONTROLLER_ADDRESS = ("10.0.0.254", 16000)
+HEARTBEAT_INTERVAL = 2
+
 
 def load_records(server_name):
     with open(RECORDS_FILE, "r") as file:
         all_records = json.load(file)
 
     return all_records[server_name]
+
+
+def send_heartbeat(server_name):
+
+    message = f"{server_name}|HEARTBEAT"
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(
+                message.encode(),
+                SDN_CONTROLLER_ADDRESS
+            )
+
+    except OSError as error:
+        print(
+            f"SDN HEARTBEAT FAILED: {error}",
+            flush=True
+        )
+
+
+def heartbeat_monitor(server_name):
+
+    print(
+        f"SDN heartbeat reporting enabled for {server_name}",
+        flush=True
+    )
+
+    while True:
+        send_heartbeat(server_name)
+        time.sleep(HEARTBEAT_INTERVAL)
 
 
 def check_server(peer_name, peer_address):
@@ -92,6 +125,7 @@ def health_monitor(server_name, server_status, health_failures,
                 server_status[peer_name] = new_status
 
         time.sleep(HEALTH_CHECK_INTERVAL)
+
 
 def forward_query(hostname, server_name, server_status, status_lock):
 
@@ -167,7 +201,9 @@ def start_server(server_name):
         print(f"Cache TTL: {CACHE_TTL} seconds")
         print(f"Health check interval: {HEALTH_CHECK_INTERVAL} seconds")
         print(f"Failure threshold: {MAX_HEALTH_FAILURES}")
+        print(f"Heartbeat interval: {HEARTBEAT_INTERVAL} seconds")
         print("Health monitoring enabled")
+        print("SDN heartbeat reporting enabled")
         print("Server ready...\n")
 
         monitor = threading.Thread(
@@ -181,6 +217,13 @@ def start_server(server_name):
             daemon=True
         )
         monitor.start()
+
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_monitor,
+            args=(server_name,),
+            daemon=True
+        )
+        heartbeat_thread.start()
 
         while True:
             try:
