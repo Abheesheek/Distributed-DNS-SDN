@@ -163,8 +163,6 @@ Distributed-DNS-SDN/
 ├── topology.py
 ├── config/
 │   └── records.json
-├── tests/
-│   └── performance_test.py
 ├── requirements.txt
 ├── .gitignore
 └── README.md
