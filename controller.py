@@ -38,9 +38,16 @@ class DNSLearningSwitch(app_manager.OSKenApp):
         }
     }
 
-    CLIENT_IP = "10.0.0.1"
-    CLIENT_MAC = "00:00:00:00:00:01"
-    CLIENT_PORT = 1
+    CLIENTS = {
+        "10.0.0.1": {
+            "mac": "00:00:00:00:00:01",
+            "switch_port": 1
+        },
+        "10.0.0.5": {
+            "mac": "00:00:00:00:00:05",
+            "switch_port": 5
+        }
+    }
 
     HEARTBEAT_TIMEOUT = 7
     FAILOVER_PRIORITY = 100
@@ -62,8 +69,6 @@ class DNSLearningSwitch(app_manager.OSKenApp):
         }
 
         self.status_lock = threading.RLock()
-
-        # Used to detect servers that never send a heartbeat.
         self.startup_time = time.monotonic()
 
         self.client_sessions = {}
@@ -158,7 +163,6 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
                     last_seen = self.last_heartbeat[server_name]
 
-                    # Server has never sent a heartbeat.
                     if last_seen is None:
 
                         if (
@@ -171,8 +175,6 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
                         continue
 
-                    # Server previously sent heartbeats,
-                    # but has now stopped responding.
                     if (
                         current_time - last_seen
                         > self.HEARTBEAT_TIMEOUT
@@ -231,23 +233,23 @@ class DNSLearningSwitch(app_manager.OSKenApp):
         datapath.send_msg(flow_mod)
 
     def get_request_match(
-        self, parser, original_name, client_udp_port
+        self, parser, client_ip, original_name, client_udp_port
     ):
 
         original = self.DNS_SERVERS[original_name]
 
         return parser.OFPMatch(
-            in_port=self.CLIENT_PORT,
+            in_port=self.CLIENTS[client_ip]["switch_port"],
             eth_type=0x0800,
             ip_proto=17,
-            ipv4_src=self.CLIENT_IP,
+            ipv4_src=client_ip,
             ipv4_dst=original["ip"],
             udp_src=client_udp_port,
             udp_dst=original["port"]
         )
 
     def get_reply_match(
-        self, parser, backup_name, client_udp_port
+        self, parser, client_ip, backup_name, client_udp_port
     ):
 
         backup = self.DNS_SERVERS[backup_name]
@@ -257,7 +259,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
             eth_type=0x0800,
             ip_proto=17,
             ipv4_src=backup["ip"],
-            ipv4_dst=self.CLIENT_IP,
+            ipv4_dst=client_ip,
             udp_src=backup["port"],
             udp_dst=client_udp_port
         )
@@ -285,7 +287,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
     def install_failover(
         self, datapath, original_name,
-        backup_name, client_udp_port
+        backup_name, client_ip, client_udp_port
     ):
 
         parser = datapath.ofproto_parser
@@ -293,6 +295,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
         request_match = self.get_request_match(
             parser,
+            client_ip,
             original_name,
             client_udp_port
         )
@@ -312,6 +315,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
         reply_match = self.get_reply_match(
             parser,
+            client_ip,
             backup_name,
             client_udp_port
         )
@@ -327,7 +331,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
                 udp_src=original["port"]
             ),
             parser.OFPActionOutput(
-                self.CLIENT_PORT
+                self.CLIENTS[client_ip]["switch_port"]
             )
         ]
 
@@ -354,11 +358,12 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
         parser = datapath.ofproto_parser
 
-        for client_udp_port, original_name in list(
-            self.client_sessions.items()
+        for (client_ip, client_udp_port, original_name) in list(
+            self.client_sessions
         ):
 
             session_key = (
+                client_ip,
                 client_udp_port,
                 original_name
             )
@@ -383,12 +388,14 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
                 request_match = self.get_request_match(
                     parser,
+                    client_ip,
                     original_name,
                     client_udp_port
                 )
 
                 reply_match = self.get_reply_match(
                     parser,
+                    client_ip,
                     previous_backup,
                     client_udp_port
                 )
@@ -419,6 +426,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
                     datapath,
                     original_name,
                     desired_backup,
+                    client_ip,
                     client_udp_port
                 )
 
@@ -447,7 +455,6 @@ class DNSLearningSwitch(app_manager.OSKenApp):
             )
         ]
 
-        # Default table-miss rule.
         self.add_flow(
             datapath,
             0,
@@ -455,26 +462,26 @@ class DNSLearningSwitch(app_manager.OSKenApp):
             actions
         )
 
-        # Send new DNS client sessions to the controller.
-        # Priority 50 overrides ordinary forwarding rules.
-        # Priority 100 failover rules take precedence.
-        for server_name, details in self.DNS_SERVERS.items():
+        # Intercept DNS queries from both clients.
+        for client_ip, client in self.CLIENTS.items():
 
-            dns_match = parser.OFPMatch(
-                in_port=self.CLIENT_PORT,
-                eth_type=0x0800,
-                ip_proto=17,
-                ipv4_src=self.CLIENT_IP,
-                ipv4_dst=details["ip"],
-                udp_dst=details["port"]
-            )
+            for server_name, details in self.DNS_SERVERS.items():
 
-            self.add_flow(
-                datapath,
-                50,
-                dns_match,
-                actions
-            )
+                dns_match = parser.OFPMatch(
+                    in_port=client["switch_port"],
+                    eth_type=0x0800,
+                    ip_proto=17,
+                    ipv4_src=client_ip,
+                    ipv4_dst=details["ip"],
+                    udp_dst=details["port"]
+                )
+
+                self.add_flow(
+                    datapath,
+                    50,
+                    dns_match,
+                    actions
+                )
 
         print(
             f"Switch connected: {datapath.id}",
@@ -516,12 +523,12 @@ class DNSLearningSwitch(app_manager.OSKenApp):
         ip_packet = pkt.get_protocol(ipv4.ipv4)
         udp_packet = pkt.get_protocol(udp.udp)
 
-        # Detect client DNS queries.
+        # Handle queries from either h1 or h5.
         if (
-            in_port == self.CLIENT_PORT
-            and ip_packet is not None
+            ip_packet is not None
             and udp_packet is not None
-            and ip_packet.src == self.CLIENT_IP
+            and ip_packet.src in self.CLIENTS
+            and in_port == self.CLIENTS[ip_packet.src]["switch_port"]
         ):
 
             for name, details in self.DNS_SERVERS.items():
@@ -533,29 +540,25 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
                     with self.status_lock:
 
-                        client_udp_port = (
-                            udp_packet.src_port
-                        )
-
-                        self.client_sessions[
-                            client_udp_port
-                        ] = name
-
-                        self.update_failover_rules()
+                        client_udp_port = udp_packet.src_port
+                        client_ip = ip_packet.src
 
                         session_key = (
+                            client_ip,
                             client_udp_port,
                             name
                         )
 
-                        backup_name = (
-                            self.failover_rules.get(
-                                session_key
-                            )
+                        self.client_sessions[
+                            session_key
+                        ] = time.monotonic()
+
+                        self.update_failover_rules()
+
+                        backup_name = self.failover_rules.get(
+                            session_key
                         )
 
-                        # Redirect the first packet immediately
-                        # if the selected DNS server is down.
                         if backup_name is not None:
 
                             failover_actions = (
@@ -584,10 +587,7 @@ class DNSLearningSwitch(app_manager.OSKenApp):
 
                             return
 
-                        # No backup available.
-                        if (
-                            self.server_status[name] == "DOWN"
-                        ):
+                        if self.server_status[name] == "DOWN":
 
                             print(
                                 f"SDN QUERY DROPPED: "

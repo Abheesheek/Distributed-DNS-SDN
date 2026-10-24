@@ -1,4 +1,5 @@
 
+
 import subprocess
 
 from mininet.net import Mininet
@@ -21,6 +22,7 @@ def create_topology():
     h2 = net.addHost("h2", ip="10.0.0.2/24")
     h3 = net.addHost("h3", ip="10.0.0.3/24")
     h4 = net.addHost("h4", ip="10.0.0.4/24")
+    h5 = net.addHost("h5", ip="10.0.0.5/24")
 
     c0 = net.addController(
         "c0",
@@ -35,13 +37,12 @@ def create_topology():
         failMode="secure"
     )
 
-    for host in [h1, h2, h3, h4]:
+    for host in [h1, h2, h3, h4, h5]:
         net.addLink(host, s1)
 
     net.start()
 
-    # Create a persistent controller communication interface
-    # for the lifetime of this Mininet topology.
+    # Controller communication interface
     subprocess.run(
         [
             "ovs-vsctl",
