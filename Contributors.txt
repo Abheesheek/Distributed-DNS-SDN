@@ -1,0 +1,17 @@
+Member 1:
+Name: Abhishek M. Rathod
+SRN: PES1UG25CS018
+EMAIL: abhishek05rathod@gmail.com
+GitHub id: Abheesheek
+
+Member 2:
+Name: Aditya Kumar P
+SRN: PES1UG25CS036
+Email id: adityakumarp2025@gmail.com
+GitHub id: aditya-kumar-t40
+
+Member 3:
+Name: Adeeb Singh Gill
+SRN: PES1UG25CS021
+Email id: adeebsin72@gmail.com
+GitHub id: AdeebGill1022
